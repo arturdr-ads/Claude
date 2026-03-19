@@ -37,17 +37,6 @@
     ]
   },
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash(rm -rf|rm -R|kill -9)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo '⚠️  Comando perigoso bloqueado. Isso não é seguro para execução automática.' >&2; exit 2"
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
