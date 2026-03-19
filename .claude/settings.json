@@ -1,5 +1,28 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "enabledPlugins": {
     "local-devops@local": true
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "deny": [
+      "Read(.env)",
+      "Read(secrets/**)",
+      "Write(.env)",
+      "Write(secrets/**)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); case \"$FILE\" in *.tf|*.tfvars) timeout 3s terraform fmt -diff=false \"$FILE\" 2>/dev/null ;; *.yml|*.yaml) timeout 3s yq --prettyPrint -i \"$FILE\" 2>/dev/null ;; */Dockerfile|Dockerfile) timeout 3s yq --prettyPrint -i \"$FILE\" 2>/dev/null ;; esac; git add \"$FILE\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
   }
 }
