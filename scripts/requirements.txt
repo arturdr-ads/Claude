@@ -1,0 +1,8 @@
+# Requirements para utilitários de busca web
+# Instalar com: pip install -r requirements.txt
+
+# EXA - Buscas semânticas otimizadas para LLMs
+exa-py>=1.2.0
+
+# Tavily - Buscas com RAG e respostas diretas
+tavily-python>=0.3.0

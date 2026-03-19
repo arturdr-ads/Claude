@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tf.backup
+
+# Logs
+*.log
+
+# Test files
+test.tf
+*.tmp
+*.bak
+
+# Environment (keep templates)
+.env
+.env.local
+.env.*.local
+secrets/
