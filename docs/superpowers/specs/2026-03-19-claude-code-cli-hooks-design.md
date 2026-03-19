@@ -1,8 +1,9 @@
 # Claude Code CLI: Auto-Pilot Hooks Configuration
 
 **Date:** 2026-03-19
-**Status:** Approved Design
+**Status:** Revised - Pending Re-Review
 **Author:** Claude Sonnet 4.6 (with user collaboration)
+**Revision:** 1.0 - Fixed issues from spec review
 
 ---
 
@@ -27,6 +28,35 @@ Restore automatic formatting and git add functionality **without causing freezin
 - ✅ Security via Hookify (already active) + permissions deny list
 - ✅ Performance < 2s per operation
 - ✅ No freezing even with large files
+
+---
+
+## Prerequisites
+
+### Required Tools
+
+| Tool | Minimum Version | Installation |
+|------|-----------------|--------------|
+| `jq` | Any | `sudo apt install jq` (Ubuntu/Debian) or `brew install jq` (macOS) |
+| `terraform` | 1.0+ | [Terraform installs](https://developer.hashicorp.com/terraform/install) |
+| `yq` | 4.0+ | `snap install yq` or `brew install yq` |
+| `timeout` | Any (GNU coreutils) | Pre-installed on Linux, use `gtimeout` on macOS |
+| `git worktree` | 2.17+ | Pre-installed with git |
+
+### Platform Support
+- ✅ **Linux** (native - fully supported)
+- ⚠️ **macOS** (requires `gtimeout` from coreutils, not standard `timeout`)
+- ❌ **Windows** (not supported - shell commands not compatible)
+
+### Verification
+```bash
+# Run before implementation
+terraform version
+jq --version
+yq --version
+timeout --version || gtimeout --version
+git worktree list
+```
 
 ---
 
@@ -96,7 +126,7 @@ Edit/Write → PostToolUse hook → (terraform fmt OR yq) → git add → done
         "hooks": [
           {
             "type": "command",
-            "command": "FILE=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); case \"$FILE\" in *.tf|*.tfvars) timeout 3s terraform fmt -diff=false \"$FILE\" 2>/dev/null ;; *.yml|*.yaml|Dockerfile) timeout 3s yq --prettyPrint -i \"$FILE\" 2>/dev/null ;; esac; git add \"$FILE\" 2>/dev/null || true"
+            "command": "FILE=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); case \"$FILE\" in *.tf|*.tfvars) timeout 3s terraform fmt -diff=false \"$FILE\" 2>/dev/null ;; *.yml|*.yaml) timeout 3s yq --prettyPrint -i \"$FILE\" 2>/dev/null ;; */Dockerfile|Dockerfile) timeout 3s yq --prettyPrint -i \"$FILE\" 2>/dev/null ;; esac; git add \"$FILE\" 2>/dev/null || true"
           }
         ]
       }
@@ -110,12 +140,23 @@ Edit/Write → PostToolUse hook → (terraform fmt OR yq) → git add → done
 | Component | Value | Rationale |
 |-----------|-------|-----------|
 | `jq -r '.tool_input.file_path // empty'` | Extract file path | Works even if extraction fails |
-| `timeout 3s` | Limit formatter runtime | Prevents freezing on large files |
+| `timeout 3s` | Limit formatter runtime | Prevents freezing on large files (safety net) |
 | `2>/dev/null` | Suppress errors | Missing formatter doesn't break hook |
 | `|| true` | Continue on failure | Git add failure doesn't interrupt |
 | `-diff=false` | Explicit flag | Consistency, speed (already default) |
 | `yq --prettyPrint -i` | In-place YAML edit | Modifies file directly |
+| `*/Dockerfile\|Dockerfile` | Dockerfile pattern | Matches both `Dockerfile` and `path/Dockerfile` |
 | `git add "$FILE"` | Add only edited file | More precise than `git add .` |
+
+### Performance Expectations
+
+| File Size | Expected Time | Timeout |
+|-----------|---------------|---------|
+| < 10KB (typical) | < 1s | 3s (safety net) |
+| 10-100KB (large) | < 2s | 3s (safety net) |
+| > 100KB (huge) | Timeout at 3s | 3s (prevents freeze) |
+
+**Note:** The 3s timeout is a safety net. Typical operations complete in < 2s. If formatter hits timeout, it's aborted but doesn't freeze the CLI.
 
 ---
 
@@ -129,13 +170,19 @@ Edit/Write → PostToolUse hook → (terraform fmt OR yq) → git add → done
 
 | # | Test | Expected | Verification |
 |---|------|----------|--------------|
-| 1 | Edit `.tf` file | File formatted | `git diff` shows changes |
-| 2 | Edit `.yml` file | File formatted | `git diff` shows changes |
-| 3 | Edit `.sh` file | No formatting | `git diff` empty |
-| 4 | Any Edit/Write | File staged | `git status` shows staged |
-| 5 | Read `.env` | Blocked/error | Tool denies access |
-| 6 | Run `rm -rf` | Blocked by Hookify | Hookify warning shown |
-| 7 | Performance | < 2s per operation | Stopwatch |
+| 1 | Edit `.tf` file (1KB) | File formatted | `git diff` shows changes |
+| 2 | Edit `.tf` file (100KB) | File formatted | `git diff` shows changes |
+| 3 | Edit `.yml` file (1KB) | File formatted | `git diff` shows changes |
+| 4 | Edit `.yml` file (100KB) | File formatted | `git diff` shows changes |
+| 5 | Edit `Dockerfile` | File formatted | `git diff` shows changes |
+| 6 | Edit `.sh` file | No formatting | `git diff` empty |
+| 7 | Any Edit/Write | File staged | `git status` shows staged |
+| 8 | Read `.env` | Blocked/error | Tool denies access |
+| 9 | Run `rm -rf` | Blocked by Hookify | Hookify warning shown |
+| 10 | Performance (1KB file) | < 1s per operation | `time` command |
+| 11 | Performance (100KB file) | < 2s per operation | `time` command |
+| 12 | Edge: File deleted during edit | Hook fails gracefully | No error, continues |
+| 13 | Edge: Read-only file | Git add fails silently | No error, file modified |
 
 ### Load Test
 ```
@@ -191,6 +238,46 @@ Edit 10 .tf files sequentially → total time < 20s
 5. → Verify performance and security
 6. → Apply to main branch if all tests pass
 7. → Commit with proper message
+
+---
+
+## Rollback Procedure
+
+If testing fails or causes issues:
+
+### 1. Revert settings.json
+```bash
+# In worktree or main branch
+git checkout HEAD -- .claude/settings.json
+```
+
+### 2. Remove worktree (cleanup)
+```bash
+# From main branch
+git worktree remove ../test-hooks
+git worktree prune
+```
+
+### 3. Verify rollback
+```bash
+# Check hooks are gone
+jq '.hooks' .claude/settings.json
+# Should return null or empty
+```
+
+### 4. If already applied to main
+```bash
+# Revert the commit
+git revert <commit-hash>
+# OR reset to previous commit
+git reset --hard HEAD~1
+```
+
+### Emergency Disable (if CLI freezes)
+```bash
+# Disable all hooks immediately
+echo '{"hooks":{}}' > .claude/settings.json
+```
 
 ---
 
