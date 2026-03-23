@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schemastore.org/claude-code-settings.json",
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "enabledPlugins": {
     "local-devops@local": true
   },
@@ -29,8 +29,8 @@
         "matcher": "Bash(git push.*main)",
         "hooks": [
           {
-            "type": "prompt",
-            "message": "⚠️ Você está fazendo push para branch main. Confirmar? (s/N)"
+            "type": "command",
+            "command": "echo '⚠️ Você está fazendo push para branch main.'"
           }
         ]
       }
@@ -62,35 +62,6 @@
           {
             "type": "command",
             "command": "echo \"[$(date '+%H:%M:%S')] 📝 Task received\" >> ~/.claude/task.log 2>/dev/null || true"
-          }
-        ]
-      },
-      {
-        "matcher": "commit|push|deploy",
-        "hooks": [
-          {
-            "type": "prompt",
-            "message": "🔄 Operação Git/Deploy detectada. Deseja continuar? (s/N)"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "TaskCompleted",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "which notify-send >/dev/null 2>&1 && notify-send 'Claude Code' '✅ Task completed' || true"
-          }
-        ]
-      },
-      {
-        "matcher": "Error",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "which notify-send >/dev/null 2>&1 && notify-send 'Claude Code' '❌ Error occurred' -u critical || true"
           }
         ]
       }
