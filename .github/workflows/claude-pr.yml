@@ -1,0 +1,51 @@
+name: Claude PR Action
+on:
+  issue_comment:
+    types:
+      - created
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+permissions:
+  contents: read
+  pull-requests: write
+  contents: write
+jobs:
+  claude:
+    name: Claude Code Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Terraform
+        if: hashFiles('*.tf') != ''
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest
+      - name: Terraform Plan
+        if: hashFiles('*.tf') != ''
+        run: |
+          terraform init -upgrade
+          terraform plan -out=tfplan
+        continue-on-error: true
+      - name: Claude Code Action
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          trigger_phrase: '@claude'
+          claude_args: --model claude-sonnet-4-20250514 --max-turns 10
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  terraform-security:
+    name: Terraform Security Scan
+    if: hashFiles('*.tf') != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1
+        with:
+          soft_fail: true
