@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "$schema": "https://json-schemastore.org/claude-code-settings.json",
   "enabledPlugins": {
     "local-devops@local": true
   },
@@ -13,13 +13,84 @@
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🚀 Auto-Pilot DevOps Mode initialized' && git diff --stat HEAD~5..HEAD 2>/dev/null | tail -5 || echo 'No recent changes'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash(git push.*main)",
+        "hooks": [
+          {
+            "type": "prompt",
+            "message": "⚠️ Você está fazendo push para branch main. Confirmar? (s/N)"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "FILE=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); case \"$FILE\" in *.tf|*.tfvars) timeout 3s terraform fmt -diff=false \"$FILE\" 2>/dev/null ;; *.yml|*.yaml) timeout 3s yq -i \"$FILE\" 2>/dev/null ;; */Dockerfile|Dockerfile) timeout 3s yq -i \"$FILE\" 2>/dev/null ;; esac; git add \"$FILE\" 2>/dev/null || true"
+            "command": "FILE=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); case \"$FILE\" in *.tf|*.tfvars) timeout 3s terraform fmt -diff=false \"$FILE\" 2>/dev/null ;; *.yml|*.yaml) timeout 3s yq --prettyPrint -i \"$FILE\" 2>/dev/null ;; */Dockerfile|Dockerfile) timeout 3s yq --prettyPrint -i \"$FILE\" 2>/dev/null ;; esac; git add \"$FILE\" 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git commit.*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '✅ Commit criado. Use git push para enviar ao GitHub.'"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[$(date '+%H:%M:%S')] 📝 Task received\" >> ~/.claude/task.log 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "matcher": "commit|push|deploy",
+        "hooks": [
+          {
+            "type": "prompt",
+            "message": "🔄 Operação Git/Deploy detectada. Deseja continuar? (s/N)"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "TaskCompleted",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "which notify-send >/dev/null 2>&1 && notify-send 'Claude Code' '✅ Task completed' || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Error",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "which notify-send >/dev/null 2>&1 && notify-send 'Claude Code' '❌ Error occurred' -u critical || true"
           }
         ]
       }
