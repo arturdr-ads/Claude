@@ -1,5 +1,7 @@
 # Claude Code CLI - Auto-Pilot DevOps Mode
 
+[![CI/CD](https://github.com/arturdr-ads/Claude/actions/workflows/ci-cd-overnight.yml/badge.svg)](https://github.com/arturdr-ads/Claude/actions/workflows/ci-cd-overnight.yml)
+
 Sistema profissional de auto-pilot para Claude Code CLI com hooks avançados, formatação automática e integração OCI/Terraform.
 
 ## 🚀 Features

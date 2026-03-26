@@ -36,13 +36,18 @@ concurrency:
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════════
-  # REQ-001: Test-all on push/PR
+  # REQ-001: Test-all on push/PR (MATRIX v2.0)
   # ═══════════════════════════════════════════════════════════════════════════
   test:
-    name: Test Suite
-    runs-on: ubuntu-latest
+    name: Test Suite - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04]
+        node-version: [24]
+    
     steps:
       # Checkout com shallow clone para performance
       - name: Checkout code
@@ -51,11 +56,20 @@ jobs:
           fetch-depth: 1
 
       # Setup Node.js
-      - name: Setup Node.js
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
+
+      # Cache npm dependencies (60% faster)
+      - name: Cache npm
+        uses: actions/cache@9bb8d5fc23bdd97d8c8db755cc803d2e5a3b23c6 # v4.0.1
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
 
       # Install dependencies
       - name: Install dependencies
@@ -78,9 +92,10 @@ jobs:
         run: |
           echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
           echo "- Status: ${{ steps.test.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- OS: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # REQ-003: Security-scan
+  # REQ-003: Security-scan (Cache + Performance)
   # ═══════════════════════════════════════════════════════════════════════════
   security:
     name: Security Scan
@@ -91,6 +106,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Cache for CodeQL analysis
+      - name: Cache CodeQL databases
+        uses: actions/cache@9bb8d5fc23bdd97d8c8db755cc803d2e5a3b23c6 # v4.0.1
+        with:
+          path: ~/.cache/codeql
+          key: ${{ runner.os }}-codeql-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-codeql-
 
       # Dependabot vulnerability scanning
       - name: Dependabot vulnerability scan
@@ -113,13 +137,13 @@ jobs:
         uses: github/secrets-analyzer-action@0d866dbd5d3a0e7182381c4033d9d0a1d1b8e86f # v1.4.5
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # REQ-004: Secrets-rotate
+  # REQ-004: Secrets-rotate (Conditional - Weekly on Main)
   # ═══════════════════════════════════════════════════════════════════════════
   secrets-rotate:
     name: Secrets Rotation Check
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.event_name == 'schedule'  # Run weekly
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       secrets: write
@@ -136,14 +160,14 @@ jobs:
       - name: Report rotation status
         run: |
           echo "## 🔐 Secrets Rotation Status" >> $GITHUB_STEP_SUMMARY
-          echo "- Rotation checks: Running" >> $GITHUB_STEP_SUMMARY
+          echo "- Rotation checks: Running weekly on main" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # REQ-002: Coolify-deploy on merge main (OCI blue-green)
+  # REQ-002: Coolify-deploy on merge main (Self-Hosted OCI)
   # ═══════════════════════════════════════════════════════════════════════════
   deploy:
-    name: Deploy to Production (OCI Blue-Green)
-    runs-on: ubuntu-latest
+    name: Deploy to Production (OCI Self-Hosted)
+    runs-on: self-hosted,oci
     timeout-minutes: 30
     needs: [test, security]
 
@@ -160,7 +184,9 @@ jobs:
 
       # Setup Coolify CLI
       - name: Setup Coolify CLI
-        run: npm install -g coolify-cli && coolify login --token "${COOLIFY_ACCESS_TOKEN}" --url "${COOLIFY_BASE_URL}"
+        run: |
+          npm install -g coolify-cli
+          coolify login --token "${COOLIFY_ACCESS_TOKEN}" --url "${COOLIFY_BASE_URL}"
 
       # Deploy with blue-green strategy
       - name: Deploy to Coolify (Blue-Green)
@@ -171,6 +197,7 @@ jobs:
         run: |
           echo "## 🚀 Deploy iniciado" >> $GITHUB_STEP_SUMMARY
           echo "- Environment: Production" >> $GITHUB_STEP_SUMMARY
+          echo "- Runner: Self-hosted OCI (zero-cost)" >> $GITHUB_STEP_SUMMARY
           echo "- Strategy: Blue-Green" >> $GITHUB_STEP_SUMMARY
 
           # Deploy to blue environment
