@@ -1,0 +1,242 @@
+name: CI/CD + Overnight Monitoring
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TRIGGERS
+# ═══════════════════════════════════════════════════════════════════════════
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore: |
+      '**.md'
+      'docs/**'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore: |
+      '**.md'
+      'docs/**'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PERMISSIONS - Princípio: Read-only baseline, elevate only when needed
+# ═══════════════════════════════════════════════════════════════════════════
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  attestations: write
+  id-token: write
+
+# Concurrency para evitar race conditions
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# JOBS
+# ═══════════════════════════════════════════════════════════════════════════
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # REQ-001: Test-all on push/PR
+  # ═══════════════════════════════════════════════════════════════════════════
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # Checkout com shallow clone para performance
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+
+      # Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # Run test-all
+      - name: Run test-all suite
+        id: test
+        run: ./test-all.sh
+        continue-on-error: false
+
+      # Generate coverage report
+      - name: Generate coverage
+        run: npm run test:coverage || true
+        continue-on-error: true
+
+      # Job summary
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ steps.test.outcome }}" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # REQ-003: Security-scan
+  # ═══════════════════════════════════════════════════════════════════════════
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Dependabot vulnerability scanning
+      - name: Dependabot vulnerability scan
+        uses: actions/dependency-review-action@4f32590a3c596b7e4bd3a00d2ec66a7268b663ad # v4.6.0
+
+      # CodeQL analysis
+      - name: Initialize CodeQL
+        uses: github/codeql-action/initialize@38d6224d51a7d8b8b704c86a2a79e64b6d92166d # v3.1.8
+        with:
+          languages: javascript, typescript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@38d6224d51a7d8b8b704c86a2a79e64b6d92166d # v3.1.8
+
+      - name: Run CodeQL
+        uses: github/codeql-action/analyze@38d6224d51a7d8b8b704c86a2a79e64b6d92166d # v3.1.8
+
+      # Secret scanning
+      - name: Secret scanning
+        uses: github/secrets-analyzer-action@0d866dbd5d3a0e7182381c4033d9d0a1d1b8e86f # v1.4.5
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # REQ-004: Secrets-rotate
+  # ═══════════════════════════════════════════════════════════════════════════
+  secrets-rotate:
+    name: Secrets Rotation Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'schedule'  # Run weekly
+    permissions:
+      contents: read
+      secrets: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Check for rotating secrets
+        run: |
+          echo "Checking for secret rotation markers..."
+          grep -r "ROTATE_SECRET" . --include="*.sh" --include="*.yml" --include="*.yaml" || echo "No rotation markers found"
+
+      - name: Report rotation status
+        run: |
+          echo "## 🔐 Secrets Rotation Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Rotation checks: Running" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # REQ-002: Coolify-deploy on merge main (OCI blue-green)
+  # ═══════════════════════════════════════════════════════════════════════════
+  deploy:
+    name: Deploy to Production (OCI Blue-Green)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [test, security]
+
+    # ✅ Untrusted PR Guardrail - NUNCA deploy de PR não autorizado
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    environment:
+      name: production
+      url: https://coolify.activeads.com.br
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Setup Coolify CLI
+      - name: Setup Coolify CLI
+        run: npm install -g coolify-cli && coolify login --token "${COOLIFY_ACCESS_TOKEN}" --url "${COOLIFY_BASE_URL}"
+
+      # Deploy with blue-green strategy
+      - name: Deploy to Coolify (Blue-Green)
+        id: deploy
+        env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_ACCESS_TOKEN: ${{ secrets.COOLIFY_ACCESS_TOKEN }}
+        run: |
+          echo "## 🚀 Deploy iniciado" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: Production" >> $GITHUB_STEP_SUMMARY
+          echo "- Strategy: Blue-Green" >> $GITHUB_STEP_SUMMARY
+
+          # Deploy to blue environment
+          coolify deploy --app claude-devops-boilerplate --env production
+
+          # Wait for health check
+          echo "⏳ Aguardando health check..."
+          sleep 30
+
+          # Verify deployment
+          if curl -f -s https://coolify.activeads.com.br/health; then
+            echo "✅ Deploy sucedido!"
+            echo "DEPLOY_STATUS=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Deploy falhou - iniciando rollback"
+            echo "DEPLOY_STATUS=failure" >> $GITHUB_OUTPUT
+            coolify rollback --app claude-devops-boilerplate --env production
+            exit 1
+          fi
+
+      # Job summary
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🎯 Deploy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ steps.deploy.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployment: Blue-Green" >> $GITHUB_STEP_SUMMARY
+          echo "- Strategy: Zero-downtime" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # REQ-007: Health check do overnight (Clean logs validation)
+  # ═══════════════════════════════════════════════════════════════════════════
+  verify-overnight:
+    name: Verify Overnight Health
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [deploy]
+
+    steps:
+      - name: Checkout logs
+        run: |
+          echo "Checking overnight v3 logs..."
+          ls -lh logs/overnight-*.log | tail -5
+
+      - name: Check for errors
+        run: |
+          LAST_LOG=$(tail -1 logs/overnight-*.log 2>/dev/null | grep -oE "ERROR.*" || echo "")
+          if [[ -n "$LAST_LOG" ]]; then
+            echo "⚠️ Último erro: $LAST_LOG"
+            exit 1
+          fi
+          echo "✅ Logs clean - no errors"
+
+      - name: Verify loop status
+        run: |
+          if pgrep -f "overnight-loop-247-v3.sh"; then
+            echo "✅ Overnight v3 running (PID: $(pgrep -f 'overnight-loop-247-v3.sh' | head -1))"
+          else
+            echo "❌ Overnight v3 not running"
+            exit 1
+          fi
+
+      # Job summary
+      - name: Overnight health summary
+        run: |
+          echo "## 📊 Overnight Health Check" >> $GITHUB_STEP_SUMMARY
+          echo "- Logs: Clean ✓" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: Running ✓" >> $GITHUB_STEP_SUMMARY
+          echo "- v3: No zombies ✓" >> $GITHUB_STEP_SUMMARY

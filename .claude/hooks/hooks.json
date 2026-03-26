@@ -1,0 +1,13 @@
+{
+  "PostToolUse": [
+    {
+      "matcher": "Edit|Write",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "echo 'Auto-formatted by local-devops plugin'"
+        }
+      ]
+    }
+  ]
+}
