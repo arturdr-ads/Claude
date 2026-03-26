@@ -267,3 +267,78 @@ jobs:
           echo "- Logs: Clean ✓" >> $GITHUB_STEP_SUMMARY
           echo "- Status: Running ✓" >> $GITHUB_STEP_SUMMARY
           echo "- v3: No zombies ✓" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # REQ-008: NOTIFICATION (Discord Slack Email)
+  # ═══════════════════════════════════════════════════════════════════════════
+  notification:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: [verify-overnight]
+    if: failure()  # Só notifica se falhou
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Send Discord notification
+        if: env.DISCORD_WEBHOOK_URL != ''
+        run: |
+          DISCORD_WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if [[ -n "$DISCORD_WEBHOOK_URL" ]]; then
+            curl -X POST "$DISCORD_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "embeds": [{
+                  "title": "🚨 CI/CD FAIL - ${{ github.workflow }}",
+                  "color": 15158332,
+                  "fields": [
+                    {"name": "Repository", "value": "'${{ github.repository }}'", "inline": true},
+                    {"name": "Branch", "value": "'${{ github.ref_name }}'", "inline": true},
+                    {"name": "Commit", "value": "'${{ github.sha }}'", "inline": true},
+                    {"name": "Author", "value": "'${{ github.actor }}'", "inline": true},
+                    {"name": "Error", "value": "Job failed - check logs", "inline": false}
+                  ],
+                  "footer": {"text": "GitHub Actions v2.0"},
+                  "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
+                }]
+              }'
+          fi
+
+      - name: Send Slack notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          SLACK_WEBHOOK_URL="${{ secrets.SLACK_WEBHOOK_URL }}"
+          if [[ -n "$SLACK_WEBHOOK_URL" ]]; then
+            curl -X POST "$SLACK_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"text\": \"🚨 CI/CD FAIL: ${{ github.workflow }} failed\",
+                \"attachments\": [{
+                  \"color\": \"danger\",
+                  \"fields\": [
+                    {\"title\": \"Repository\", \"value\": \"${{ github.repository }}\", \"short\": true},
+                    {\"title\": \"Branch\", \"value\": \"${{ github.ref_name }}\", \"short\": true},
+                    {\"title\": \"Commit\", \"value\": \"${{ github.sha }}\", \"short\": true},
+                    {\"title\": \"Author\", \"value\": \"${{ github.actor }}\", \"short\": true}
+                  ]
+                }]
+              }"
+          fi
+
+      - name: Send email notification
+        if: env.EMAIL_NOTIFICATION_ENABLED != 'true'
+        run: |
+          EMAIL_TO="${{ secrets.NOTIFICATION_EMAIL }}"
+          if [[ -n "$EMAIL_TO" ]]; then
+            echo "To: $EMAIL_TO" | mail -s "🚨 CI/CD FAIL - ${{ github.workflow }}" < /dev/null
+          fi
+
+      # Job summary
+      - name: Notification summary
+        run: |
+          echo "## 🔔 NOTIFICATION SENT" >> $GITHUB_STEP_SUMMARY
+          echo "- Discord: ${{ secrets.DISCORD_WEBHOOK_URL != '' && '✓' || '✗' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Slack: ${{ secrets.SLACK_WEBHOOK_URL != '' && '✓' || '✗' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Email: ${{ secrets.EMAIL_NOTIFICATION_ENABLED == 'true' && '✓' || '✗' }}" >> $GITHUB_STEP_SUMMARY
